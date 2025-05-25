@@ -1,7 +1,8 @@
-const Task = require('../models/taskModel');
-const { validationResult } = require('express-validator'); // Import this
+const Task = require('../models/taskModel'); // Still needed for Task model reference in service
+const taskService = require('../services/taskService'); // Import the service
+const { validationResult } = require('express-validator');
 
-// Helper function to handle validation results
+// Helper function to handle validation results (remains the same)
 const handleValidationErrors = (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -12,13 +13,13 @@ const handleValidationErrors = (req, res, next) => {
 
 // Create a new task
 const createTask = async (req, res) => {
-    const { title, description, category } = req.body; // Validation handled by middleware
+    const { title, description, category } = req.body;
     try {
-        const task = await Task.create({
+        const task = await taskService.createTask({
             title,
             description,
             category,
-            user: req.user._id, // User is attached via auth middleware
+            userId: req.user._id, // Pass user ID to the service
         });
         res.status(201).json(task);
     } catch (error) {
@@ -28,9 +29,8 @@ const createTask = async (req, res) => {
 
 // Get all tasks for the authenticated user
 const getTasks = async (req, res) => {
-    // No specific input validation needed for GET all tasks
     try {
-        const tasks = await Task.find({ user: req.user._id }).sort({ createdAt: -1 });
+        const tasks = await taskService.getTasksByUserId(req.user._id);
         res.json(tasks);
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -39,36 +39,31 @@ const getTasks = async (req, res) => {
 
 // Get a single task by ID
 const getTaskById = async (req, res) => {
-    // ID validation handled by middleware
     try {
-        const task = await Task.findOne({ _id: req.params.id, user: req.user._id });
+        const task = await taskService.getTaskByIdAndUserId(req.params.id, req.user._id);
         if (task) {
             res.json(task);
         } else {
             res.status(404).json({ message: 'Task not found' });
         }
     } catch (error) {
-        // Mongoose CastError for invalid ObjectId will be caught here
         res.status(500).json({ message: error.message });
     }
 };
 
 // Update a task
 const updateTask = async (req, res) => {
-    const { title, description, category, completed } = req.body; // Validation handled by middleware
+    const { title, description, category, completed } = req.body;
     try {
-        const task = await Task.findOne({ _id: req.params.id, user: req.user._id });
-        if (task) {
-            task.title = title !== undefined ? title : task.title; // Allow partial updates
-            task.description = description !== undefined ? description : task.description;
-            task.category = category !== undefined ? category : task.category;
-            task.completed = typeof completed === 'boolean' ? completed : task.completed;
-            task.updatedAt = Date.now();
-
-            const updatedTask = await task.save();
+        const updatedTask = await taskService.updateTask(
+            req.params.id,
+            req.user._id,
+            { title, description, category, completed } // Pass all potentially updated fields
+        );
+        if (updatedTask) {
             res.json(updatedTask);
         } else {
-            res.status(404).json({ message: 'Task not found' });
+            res.status(404).json({ message: 'Task not found or not owned by user' });
         }
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -77,16 +72,17 @@ const updateTask = async (req, res) => {
 
 // Mark task as complete/incomplete
 const markTaskComplete = async (req, res) => {
-    const { completed } = req.body; // Validation handled by middleware
+    const { completed } = req.body;
     try {
-        const task = await Task.findOne({ _id: req.params.id, user: req.user._id });
-        if (task) {
-            task.completed = completed;
-            task.updatedAt = Date.now();
-            const updatedTask = await task.save();
+        const updatedTask = await taskService.markTaskComplete(
+            req.params.id,
+            req.user._id,
+            completed
+        );
+        if (updatedTask) {
             res.json(updatedTask);
         } else {
-            res.status(404).json({ message: 'Task not found' });
+            res.status(404).json({ message: 'Task not found or not owned by user' });
         }
     } catch (error) {
         res.status(400).json({ message: error.message });
@@ -95,13 +91,12 @@ const markTaskComplete = async (req, res) => {
 
 // Delete a task
 const deleteTask = async (req, res) => {
-    // ID validation handled by middleware
     try {
-        const task = await Task.findOneAndDelete({ _id: req.params.id, user: req.user._id });
-        if (task) {
-            res.json({ message: 'Task removed' });
+        const deletedTask = await taskService.deleteTask(req.params.id, req.user._id);
+        if (deletedTask) {
+            res.json({ message: 'Task removed successfully' });
         } else {
-            res.status(404).json({ message: 'Task not found' });
+            res.status(404).json({ message: 'Task not found or not owned by user' });
         }
     } catch (error) {
         res.status(500).json({ message: error.message });
@@ -115,5 +110,5 @@ module.exports = {
     updateTask,
     markTaskComplete,
     deleteTask,
-    handleValidationErrors // Export this for use in routes
+    handleValidationErrors
 };
